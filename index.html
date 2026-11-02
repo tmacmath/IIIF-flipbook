@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Flipbook</title>
+    <style>
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      body {
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 2rem;
+        background: #000;
+        font-family: Georgia, serif;
+        color: #edf2f4;
+      }
+
+      .scene {
+        --page-w: 320px;
+        --page-h: 450px;
+        perspective: 1800px;
+      }
+
+      .book {
+        position: relative;
+        width: calc(var(--page-w) * 2);
+        height: var(--page-h);
+        transform-style: preserve-3d;
+        transition: transform 0.6s ease;
+      }
+
+      /* Each leaf sits on the right half and hinges on the spine (its left edge). */
+      .leaf {
+        position: absolute;
+        top: 0;
+        left: 50%;
+        width: var(--page-w);
+        height: var(--page-h);
+        transform-origin: left center;
+        transform-style: preserve-3d;
+        transition: transform 0.8s ease;
+        cursor: pointer;
+      }
+      .leaf.flipped {
+        transform: rotateY(-180deg);
+      }
+
+      .face {
+        position: absolute;
+        inset: 0;
+        padding: 2rem;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        backface-visibility: hidden;
+        background: #fdf6e3;
+        color: #333;
+        box-shadow: inset 6px 0 12px -8px rgba(0, 0, 0, 0.4);
+        border-radius: 0 6px 6px 0;
+      }
+      .face.back {
+        transform: rotateY(180deg);
+        box-shadow: inset -6px 0 12px -8px rgba(0, 0, 0, 0.4);
+        border-radius: 6px 0 0 6px;
+      }
+      .face.cover {
+        background: #8d99ae;
+        color: #fff;
+        font-size: 1.6rem;
+      }
+      .face.image {
+        padding: 0;
+        overflow: hidden;
+        background: #000;
+      }
+      .face.image img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        display: block;
+      }
+      .face h2 {
+        margin-bottom: 1rem;
+      }
+      .face .num {
+        position: absolute;
+        bottom: 1rem;
+        font-size: 0.8rem;
+        opacity: 0.6;
+      }
+
+      .controls {
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+      }
+      button {
+        padding: 0.5rem 1.2rem;
+        font: inherit;
+        color: inherit;
+        background: #8d99ae;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+      }
+      button:disabled {
+        opacity: 0.4;
+        cursor: default;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="scene">
+      <div class="book" id="book"></div>
+    </div>
+
+    <div class="controls">
+      <button id="first">&laquo; Front cover</button>
+      <button id="prev">&larr; Prev</button>
+      <span id="status"></span>
+      <button id="next">Next &rarr;</button>
+      <button id="last">Back cover &raquo;</button>
+    </div>
+
+    <script>
+      // Pages are loaded straight from this IIIF manifest (Presentation API v2 or v3).
+      const MANIFEST_URL = "https://collections.library.yale.edu/manifests/2009732"
+
+      // Smaller versions from the IIIF server: 1000px tall, width scaled to match.
+      // Change 1000 to get a different size (the book displays pages 450px tall).
+      const PAGE_HEIGHT = 1000
+
+      function imageUrls(manifest) {
+        if (manifest.sequences) {
+          // Presentation v2
+          return manifest.sequences[0].canvases.map(canvas => canvas.images[0].resource["@id"])
+        }
+        // Presentation v3
+        return manifest.items.map(canvas => {
+          let body = canvas.items[0].items[0].body
+          if (Array.isArray(body)) body = body[0]
+          return body.id
+        })
+      }
+
+      async function init() {
+        let images
+        try {
+          const res = await fetch(MANIFEST_URL)
+          if (!res.ok) throw new Error(`HTTP ${res.status}`)
+          images = imageUrls(await res.json()).map(url => url.replace(/\/full\/(full|max)\//, `/full/,${PAGE_HEIGHT}/`))
+          // Drop the two pages just before the back cover (keeps the back cover last).
+          images.splice(images.length - 3, 2)
+        } catch (err) {
+          document.getElementById("status").textContent = `Could not load manifest: ${err.message}`
+          return
+        }
+
+        const book = document.getElementById("book")
+        for (let i = 0; i < images.length; i += 2) {
+          const leaf = document.createElement("div")
+          leaf.className = "leaf"
+          const back = images[i + 1] ? `<img data-src="${images[i + 1]}" alt="Page ${i + 2}">` : ""
+          leaf.innerHTML = `<div class="face front image"><img data-src="${images[i]}" alt="Page ${i + 1}"></div>` + `<div class="face back image">${back}</div>`
+          book.appendChild(leaf)
+        }
+        const leaves = [...book.querySelectorAll(".leaf")]
+        const prev = document.getElementById("prev")
+        const next = document.getElementById("next")
+        const first = document.getElementById("first")
+        const last = document.getElementById("last")
+        const status = document.getElementById("status")
+        const total = leaves.length
+        let current = 0 // number of leaves flipped to the left
+
+        // Only load images for leaves near the current page, so we don't request
+        // hundreds of full-size images at once.
+        function loadNear() {
+          leaves.forEach((leaf, i) => {
+            if (Math.abs(i - current) > 2) return
+            leaf.querySelectorAll("img[data-src]").forEach(img => {
+              const url = img.dataset.src
+              img.removeAttribute("data-src")
+              let tries = 0
+              // If the server rejects a request, try again after a short wait.
+              img.addEventListener("error", () => {
+                if (tries++ < 5) setTimeout(() => (img.src = url), 1000 * tries)
+              })
+              img.src = url
+            })
+          })
+        }
+
+        function render() {
+          loadNear()
+          leaves.forEach((leaf, i) => {
+            leaf.classList.toggle("flipped", i < current)
+            // Flipped leaves stack with the latest on top; unflipped with the next on top.
+            leaf.style.zIndex = i < current ? i : total - i
+          })
+          // Keep the book centered when closed (front cover / back cover).
+          book.style.transform = current === 0 ? "translateX(-25%)" : current === total ? "translateX(25%)" : "translateX(0)"
+          prev.disabled = current === 0
+          first.disabled = current === 0
+          next.disabled = current === total
+          last.disabled = current === total
+          status.textContent = `${current} / ${total}`
+        }
+
+        const goNext = () => {
+          if (current < total) {
+            current++
+            render()
+          }
+        }
+        const goPrev = () => {
+          if (current > 0) {
+            current--
+            render()
+          }
+        }
+
+        first.addEventListener("click", () => {
+          current = 0
+          render()
+        })
+        last.addEventListener("click", () => {
+          current = total
+          render()
+        })
+        next.addEventListener("click", goNext)
+        prev.addEventListener("click", goPrev)
+        leaves.forEach((leaf, i) => leaf.addEventListener("click", () => (i < current ? goPrev() : goNext())))
+        document.addEventListener("keydown", e => {
+          if (e.key === "ArrowRight") goNext()
+          if (e.key === "ArrowLeft") goPrev()
+        })
+
+        render()
+      }
+
+      init()
+    </script>
+  </body>
+</html>
