@@ -89,6 +89,13 @@
         object-fit: contain;
         display: block;
       }
+      /* Push each image toward the spine so there is no gap between facing pages. */
+      .face.front.image img {
+        object-position: left center;
+      }
+      .face.back.image img {
+        object-position: right center;
+      }
       .face h2 {
         margin-bottom: 1rem;
       }
@@ -134,7 +141,7 @@
 
     <script>
       // Pages are loaded straight from this IIIF manifest (Presentation API v2 or v3).
-      const MANIFEST_URL = "https://collections.library.yale.edu/manifests/2009732"
+      const MANIFEST_URL = "https://collections.library.yale.edu/manifests/16037197"
 
       // Smaller versions from the IIIF server: 1000px tall, width scaled to match.
       // Change 1000 to get a different size (the book displays pages 450px tall).
