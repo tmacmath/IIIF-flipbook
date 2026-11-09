@@ -49,8 +49,19 @@
         height: var(--page-h);
         transform-origin: left center;
         transform-style: preserve-3d;
-        transition: transform 0.8s ease;
+        transition: transform 0.8s ease, visibility 0s;
         cursor: pointer;
+      }
+      /* Sheets that aren't one of the two showing are hidden once they've finished
+         moving, so a sheet sitting behind another can't show through its edge. */
+      .leaf.far {
+        visibility: hidden;
+        transition: transform 0.8s ease, visibility 0s 0.8s;
+      }
+      /* Sheets that were not showing before a flip (e.g. the ones in the middle when
+         jumping to the front or back cover) vanish at once instead of piling up. */
+      .leaf.far.gone {
+        transition: transform 0.8s ease, visibility 0s;
       }
       .leaf.flipped {
         transform: rotateY(-180deg);
@@ -239,13 +250,19 @@
           })
         }
 
+        let shown = new Set() // sheets that were showing before this render
+
         function render() {
           loadNear()
+          const nowShown = new Set([current, current - 1])
           leaves.forEach((leaf, i) => {
             leaf.classList.toggle("flipped", i < current)
+            leaf.classList.toggle("far", !nowShown.has(i))
+            leaf.classList.toggle("gone", !nowShown.has(i) && !shown.has(i))
             // Flipped leaves stack with the latest on top; unflipped with the next on top.
             leaf.style.zIndex = i < current ? i : total - i
           })
+          shown = nowShown
           // Keep the book centered when closed (front cover / back cover).
           book.style.transform = current === 0 ? "translateX(-25%)" : current === total ? "translateX(25%)" : "translateX(0)"
           prev.disabled = current === 0
