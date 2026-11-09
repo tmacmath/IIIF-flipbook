@@ -26,8 +26,9 @@
       .scene {
         /* Scale the book to the window: pages are about 80% of the window height,
            but never so wide that the open book overflows the window width. */
-        --page-h: min(80vh, 63vw);
-        --page-w: calc(var(--page-h) * 0.711);
+        --aspect: 0.711; /* page width / height; set from the manifest once it loads */
+        --page-h: min(80vh, calc(90vw / (2 * var(--aspect))));
+        --page-w: calc(var(--page-h) * var(--aspect));
         perspective: calc(var(--page-h) * 4);
       }
 
@@ -85,18 +86,19 @@
         overflow: hidden;
         background: #000;
       }
+      /* Each image is sized (inline) relative to the largest scan, so every page is
+         shown at the same scale, as in the original manuscript. Pages are aligned to the
+         top and sit flush against the spine. */
       .face.image img {
-        width: 100%;
-        height: 100%;
-        object-fit: contain;
+        position: absolute;
+        top: 0;
         display: block;
       }
-      /* Push each image toward the spine so there is no gap between facing pages. */
       .face.front.image img {
-        object-position: left center;
+        left: 0;
       }
       .face.back.image img {
-        object-position: right center;
+        right: 0;
       }
       .face h2 {
         margin-bottom: 1rem;
@@ -150,28 +152,52 @@
       // screen's pixel density, rounded up to the next 100 and kept between MIN and MAX.
       const MIN_PAGE_HEIGHT = 600
       const MAX_PAGE_HEIGHT = 2000
-      const shownHeight = Math.min(0.8 * window.innerHeight, 0.63 * window.innerWidth)
-      const PAGE_HEIGHT = Math.min(MAX_PAGE_HEIGHT, Math.max(MIN_PAGE_HEIGHT, Math.ceil((shownHeight * (window.devicePixelRatio || 1)) / 100) * 100))
 
-      function imageUrls(manifest) {
+      // One entry per page: the image URL plus the page's size in the manifest.
+      function pages(manifest) {
         if (manifest.sequences) {
           // Presentation v2
-          return manifest.sequences[0].canvases.map(canvas => canvas.images[0].resource["@id"])
+          return manifest.sequences[0].canvases.map(canvas => ({
+            url: canvas.images[0].resource["@id"],
+            w: canvas.width,
+            h: canvas.height,
+          }))
         }
         // Presentation v3
         return manifest.items.map(canvas => {
           let body = canvas.items[0].items[0].body
           if (Array.isArray(body)) body = body[0]
-          return body.id
+          return { url: body.id, w: canvas.width, h: canvas.height }
         })
       }
 
       async function init() {
-        let images
+        let images // [{ src, style }]
         try {
           const res = await fetch(MANIFEST_URL)
           if (!res.ok) throw new Error(`HTTP ${res.status}`)
-          images = imageUrls(await res.json()).map(url => url.replace(/\/full\/(full|max)\//, `/full/,${PAGE_HEIGHT}/`))
+          const list = pages(await res.json())
+
+          // The page box takes the shape of the largest scan; every other page is drawn
+          // at the same scale, so smaller scans look smaller (like the real book).
+          const sized = list.filter(p => p.w && p.h)
+          const maxW = Math.max(...sized.map(p => p.w), 1)
+          const maxH = Math.max(...sized.map(p => p.h), 1)
+          const aspect = sized.length ? maxW / maxH : 0.711
+          document.querySelector(".scene").style.setProperty("--aspect", aspect)
+
+          // Request each image at the size it is shown on screen (see MIN/MAX above).
+          const shownHeight = Math.min(0.8 * window.innerHeight, (0.9 * window.innerWidth) / (2 * aspect))
+          const pageHeight = Math.min(MAX_PAGE_HEIGHT, Math.max(MIN_PAGE_HEIGHT, Math.ceil((shownHeight * (window.devicePixelRatio || 1)) / 100) * 100))
+
+          images = list.map(p => {
+            const known = p.w && p.h
+            const height = known ? Math.round((pageHeight * p.h) / maxH) : pageHeight
+            return {
+              src: p.url.replace(/\/full\/(full|max)\//, `/full/,${height}/`),
+              style: known ? `width:${(p.w / maxW) * 100}%;height:${(p.h / maxH) * 100}%` : "width:100%;height:100%;object-fit:contain",
+            }
+          })
         } catch (err) {
           document.getElementById("status").textContent = `Could not load manifest: ${err.message}`
           return
@@ -181,8 +207,9 @@
         for (let i = 0; i < images.length; i += 2) {
           const leaf = document.createElement("div")
           leaf.className = "leaf"
-          const back = images[i + 1] ? `<img data-src="${images[i + 1]}" alt="Page ${i + 2}">` : ""
-          leaf.innerHTML = `<div class="face front image"><img data-src="${images[i]}" alt="Page ${i + 1}"></div>` + `<div class="face back image">${back}</div>`
+          const img = (p, n) => `<img data-src="${p.src}" style="${p.style}" alt="Page ${n}">`
+          const back = images[i + 1] ? img(images[i + 1], i + 2) : ""
+          leaf.innerHTML = `<div class="face front image">${img(images[i], i + 1)}</div>` + `<div class="face back image">${back}</div>`
           book.appendChild(leaf)
         }
         const leaves = [...book.querySelectorAll(".leaf")]
