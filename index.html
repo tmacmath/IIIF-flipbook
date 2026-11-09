@@ -26,9 +26,8 @@
       .scene {
         /* Scale the book to the window: pages are about 80% of the window height,
            but never so wide that the open book overflows the window width. */
-        --aspect: 0.711; /* page width / height; replaced by the book's real shape once the manifest loads */
-        --page-h: min(80vh, calc(90vw / (2 * var(--aspect))));
-        --page-w: calc(var(--page-h) * var(--aspect));
+        --page-h: min(80vh, 63vw);
+        --page-w: calc(var(--page-h) * 0.711);
         perspective: calc(var(--page-h) * 4);
       }
 
@@ -151,14 +150,8 @@
       // screen's pixel density, rounded up to the next 100 and kept between MIN and MAX.
       const MIN_PAGE_HEIGHT = 600
       const MAX_PAGE_HEIGHT = 2000
-
-      // The book's true page shape (width / height): the median across all pages, so a
-      // few oddly scanned pages don't change it. Falls back to null if sizes are missing.
-      function bookAspect(manifest) {
-        const canvases = manifest.sequences ? manifest.sequences[0].canvases : manifest.items
-        const ratios = canvases.filter(c => c.width && c.height).map(c => c.width / c.height).sort((a, b) => a - b)
-        return ratios.length ? ratios[Math.floor(ratios.length / 2)] : null
-      }
+      const shownHeight = Math.min(0.8 * window.innerHeight, 0.63 * window.innerWidth)
+      const PAGE_HEIGHT = Math.min(MAX_PAGE_HEIGHT, Math.max(MIN_PAGE_HEIGHT, Math.ceil((shownHeight * (window.devicePixelRatio || 1)) / 100) * 100))
 
       function imageUrls(manifest) {
         if (manifest.sequences) {
@@ -178,13 +171,7 @@
         try {
           const res = await fetch(MANIFEST_URL)
           if (!res.ok) throw new Error(`HTTP ${res.status}`)
-          const manifest = await res.json()
-          // Match the page box to the physical book's proportions (no stretching or cropping).
-          const aspect = bookAspect(manifest) || 0.711
-          document.querySelector(".scene").style.setProperty("--aspect", aspect)
-          const shownHeight = Math.min(0.8 * window.innerHeight, (0.9 * window.innerWidth) / (2 * aspect))
-          const PAGE_HEIGHT = Math.min(MAX_PAGE_HEIGHT, Math.max(MIN_PAGE_HEIGHT, Math.ceil((shownHeight * (window.devicePixelRatio || 1)) / 100) * 100))
-          images = imageUrls(manifest).map(url => url.replace(/\/full\/(full|max)\//, `/full/,${PAGE_HEIGHT}/`))
+          images = imageUrls(await res.json()).map(url => url.replace(/\/full\/(full|max)\//, `/full/,${PAGE_HEIGHT}/`))
         } catch (err) {
           document.getElementById("status").textContent = `Could not load manifest: ${err.message}`
           return
