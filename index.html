@@ -4,6 +4,9 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Flipbook</title>
+    <!-- Open the connection to Yale's server while the page is still loading. -->
+    <link rel="preconnect" href="https://collections.library.yale.edu" crossorigin />
+    <link rel="preconnect" href="https://collections.library.yale.edu" />
     <style>
       * {
         box-sizing: border-box;
@@ -49,19 +52,8 @@
         height: var(--page-h);
         transform-origin: left center;
         transform-style: preserve-3d;
-        transition: transform 0.8s ease, visibility 0s;
+        transition: transform 0.8s ease;
         cursor: pointer;
-      }
-      /* Sheets that aren't one of the two showing are hidden once they've finished
-         moving, so a sheet sitting behind another can't show through its edge. */
-      .leaf.far {
-        visibility: hidden;
-        transition: transform 0.8s ease, visibility 0s 0.8s;
-      }
-      /* Sheets that were not showing before a flip (e.g. the ones in the middle when
-         jumping to the front or back cover) vanish at once instead of piling up. */
-      .leaf.far.gone {
-        transition: transform 0.8s ease, visibility 0s;
       }
       .leaf.flipped {
         transform: rotateY(-180deg);
@@ -102,13 +94,33 @@
          top and sit flush against the spine. */
       .face.image img {
         position: absolute;
-        top: 0;
+        /* Centered vertically using the image's own height (--h), set inline, so no
+           transform (and no extra graphics layer per image) is needed. */
+        top: calc((100% - var(--h)) / 2);
+        width: var(--w);
+        height: var(--h);
         display: block;
       }
       .face.front.image img {
         left: 0;
       }
       .face.back.image img {
+        right: 0;
+      }
+      /* A thin black strip along the spine edge of every page. Without it, the pale
+         page sitting behind another shows through as a light line along the edge. */
+      .face.image::after {
+        content: "";
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        width: 2px;
+        background: #000;
+      }
+      .face.front.image::after {
+        left: 0;
+      }
+      .face.back.image::after {
         right: 0;
       }
       .face h2 {
@@ -206,7 +218,7 @@
             const height = known ? Math.round((pageHeight * p.h) / maxH) : pageHeight
             return {
               src: p.url.replace(/\/full\/(full|max)\//, `/full/,${height}/`),
-              style: known ? `width:${(p.w / maxW) * 100}%;height:${(p.h / maxH) * 100}%` : "width:100%;height:100%;object-fit:contain",
+              style: known ? `--w:${(p.w / maxW) * 100}%;--h:${(p.h / maxH) * 100}%` : "--w:100%;--h:100%;object-fit:contain",
             }
           })
         } catch (err) {
@@ -236,7 +248,8 @@
         // hundreds of full-size images at once.
         function loadNear() {
           leaves.forEach((leaf, i) => {
-            if (Math.abs(i - current) > 5) return
+            const distance = Math.abs(i - current)
+            if (distance > 5) return
             leaf.querySelectorAll("img[data-src]").forEach(img => {
               const url = img.dataset.src
               img.removeAttribute("data-src")
@@ -245,24 +258,27 @@
               img.addEventListener("error", () => {
                 if (tries++ < 5) setTimeout(() => (img.src = url), 1000 * tries)
               })
-              img.src = url
+              if (distance <= 1) {
+                // The sheets in view load first, at high priority.
+                img.fetchPriority = "high"
+                img.src = url
+              } else {
+                // Sheets further away wait a moment so they don't compete with the
+                // ones in view.
+                img.fetchPriority = "low"
+                setTimeout(() => (img.src = url), 400)
+              }
             })
           })
         }
 
-        let shown = new Set() // sheets that were showing before this render
-
         function render() {
           loadNear()
-          const nowShown = new Set([current, current - 1])
           leaves.forEach((leaf, i) => {
             leaf.classList.toggle("flipped", i < current)
-            leaf.classList.toggle("far", !nowShown.has(i))
-            leaf.classList.toggle("gone", !nowShown.has(i) && !shown.has(i))
             // Flipped leaves stack with the latest on top; unflipped with the next on top.
             leaf.style.zIndex = i < current ? i : total - i
           })
-          shown = nowShown
           // Keep the book centered when closed (front cover / back cover).
           book.style.transform = current === 0 ? "translateX(-25%)" : current === total ? "translateX(25%)" : "translateX(0)"
           prev.disabled = current === 0
