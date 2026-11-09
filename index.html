@@ -24,9 +24,11 @@
       }
 
       .scene {
-        --page-w: 320px;
-        --page-h: 450px;
-        perspective: 1800px;
+        /* Scale the book to the window: pages are about 80% of the window height,
+           but never so wide that the open book overflows the window width. */
+        --page-h: min(80vh, 63vw);
+        --page-w: calc(var(--page-h) * 0.711);
+        perspective: calc(var(--page-h) * 4);
       }
 
       .book {
@@ -143,9 +145,13 @@
       // Pages are loaded straight from this IIIF manifest (Presentation API v2 or v3).
       const MANIFEST_URL = "https://collections.library.yale.edu/manifests/16037197"
 
-      // Smaller versions from the IIIF server: 1000px tall, width scaled to match.
-      // Change 1000 to get a different size (the book displays pages 450px tall).
-      const PAGE_HEIGHT = 1000
+      // Smaller versions from the IIIF server, sized to how large the pages are
+      // actually shown: the page height on screen (same formula as the CSS) times the
+      // screen's pixel density, rounded up to the next 100 and kept between MIN and MAX.
+      const MIN_PAGE_HEIGHT = 600
+      const MAX_PAGE_HEIGHT = 2000
+      const shownHeight = Math.min(0.8 * window.innerHeight, 0.63 * window.innerWidth)
+      const PAGE_HEIGHT = Math.min(MAX_PAGE_HEIGHT, Math.max(MIN_PAGE_HEIGHT, Math.ceil((shownHeight * (window.devicePixelRatio || 1)) / 100) * 100))
 
       function imageUrls(manifest) {
         if (manifest.sequences) {
@@ -192,7 +198,7 @@
         // hundreds of full-size images at once.
         function loadNear() {
           leaves.forEach((leaf, i) => {
-            if (Math.abs(i - current) > 2) return
+            if (Math.abs(i - current) > 5) return
             leaf.querySelectorAll("img[data-src]").forEach(img => {
               const url = img.dataset.src
               img.removeAttribute("data-src")
