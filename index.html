@@ -166,8 +166,6 @@
           const res = await fetch(MANIFEST_URL)
           if (!res.ok) throw new Error(`HTTP ${res.status}`)
           images = imageUrls(await res.json()).map(url => url.replace(/\/full\/(full|max)\//, `/full/,${PAGE_HEIGHT}/`))
-          // Drop the two pages just before the back cover (keeps the back cover last).
-          images.splice(images.length - 3, 2)
         } catch (err) {
           document.getElementById("status").textContent = `Could not load manifest: ${err.message}`
           return
